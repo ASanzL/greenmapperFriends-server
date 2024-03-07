@@ -20,18 +20,17 @@ app.get('/', (req, res) => {
 })
 
 // Upload to db test
-app.post('/upload', async (req, res) => {
-  console.log('upload');
+app.post('/sethome', async (req, res) => {
+  console.log('set home');
   console.log(req.body);
   let collection = await connectDb();
  
-  // await collection.insertOne({home: req.body.home}).then(r => console.log(r));
-  collection.updateOne({}, { $set: {home: req.body.home} });
+  collection.updateOne({}, { $set: {home: req.body.home} }, { upsert: true });
 
-  res.send('added test')
+  res.send('home updated')
 })
 // Read db test
-app.get('/read', async (req, res) => {
+app.get('/gethome', async (req, res) => {
   
   let collection = await connectDb();
 
