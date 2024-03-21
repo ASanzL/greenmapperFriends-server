@@ -22,58 +22,21 @@ app.get('/', (req, res) => {
 // Upload to db test
 app.get('/checkpolygon', async (req, res) => {
   try {
-    let collection = await connectDb("polygonTest");
+    let collection = await connectDb();
 
-    // Update or insert the polygon document
-    await collection.updateOne({}, { $set: {
-      location: { type: "Polygon", coordinates: [
-        [
-          [
-              12.358589,
-              58.278245
-          ],
-          [
-              12.240829,
-              58.307477
-          ],
-          [
-              12.221947,
-              58.301344
-          ],
-          [
-              12.347603,
-              58.270121
-          ],
-          [
-              12.358589,
-              58.278245
-          ]
-      ]
-      ]}
-    }}, { upsert: true });
-
-    // Find overlapping polygons
     const result = await collection.find({
       location: {
         $geoIntersects: {
           $geometry: {
             type: "Polygon",
-            coordinates: [
-              [
-                [12.241173, 58.300081],
-                [12.22023, 58.261995],
-                [12.285118, 58.244833],
-                [12.364426, 58.303661],
-                [12.328033, 58.330708],
-                [12.241173, 58.300081]
-              ]
-            ]
+            coordinates: JSON.parse(req.query.polygon)
           }
         }
       }
     }).toArray();
-    console.log(result);
-    res.send(result.length > 0 ? result : "No overlap");
+
+    console.log(JSON.parse(req.query.polygon)[0].length);
+    res.send(result.length > 0);
   } catch (error) {
     res.status(500).send(error.message);
   }
@@ -85,7 +48,11 @@ app.post('/sethome', async (req, res) => {
   console.log(req.body);
   let collection = await connectDb();
  
-  collection.updateOne({}, { $set: {home: req.body.home} }, { upsert: true });
+  // collection.updateOne({}, { $set: {home: req.body.home} }, { upsert: true });
+  console.log(req.body);
+  await collection.updateOne({}, { $set: {
+    location: { type: "Point", coordinates: req.body}
+  }}, { upsert: true });
 
   res.send('home updated')
 })
