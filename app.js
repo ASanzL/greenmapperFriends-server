@@ -20,6 +20,66 @@ app.get('/', (req, res) => {
 })
 
 // Upload to db test
+app.get('/checkpolygon', async (req, res) => {
+  try {
+    let collection = await connectDb("polygonTest");
+
+    // Update or insert the polygon document
+    await collection.updateOne({}, { $set: {
+      location: { type: "Polygon", coordinates: [
+        [
+          [
+              12.358589,
+              58.278245
+          ],
+          [
+              12.240829,
+              58.307477
+          ],
+          [
+              12.221947,
+              58.301344
+          ],
+          [
+              12.347603,
+              58.270121
+          ],
+          [
+              12.358589,
+              58.278245
+          ]
+      ]
+      ]}
+    }}, { upsert: true });
+
+    // Find overlapping polygons
+    const result = await collection.find({
+      location: {
+        $geoIntersects: {
+          $geometry: {
+            type: "Polygon",
+            coordinates: [
+              [
+                [12.241173, 58.300081],
+                [12.22023, 58.261995],
+                [12.285118, 58.244833],
+                [12.364426, 58.303661],
+                [12.328033, 58.330708],
+                [12.241173, 58.300081]
+              ]
+            ]
+          }
+        }
+      }
+    }).toArray();
+    console.log(result);
+    res.send(result.length > 0 ? result : "No overlap");
+  } catch (error) {
+    res.status(500).send(error.message);
+  }
+});
+
+// Upload to db test
 app.post('/sethome', async (req, res) => {
   console.log('set home');
   console.log(req.body);
@@ -42,9 +102,9 @@ app.listen(port, () => {
   console.log(`Example app listening on port ${port}`)
 })
 
-async function connectDb() {
+async function connectDb(collectionName = "test") {
   await client.connect();
   console.log('Connected successfully to server');
   const db = client.db(dbName);
-  return db.collection('test');
+  return db.collection(collectionName);
 }
