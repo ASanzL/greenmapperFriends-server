@@ -10,7 +10,7 @@ app.use(cors());
 app.use(bodyparser.json({limit: '50mb'}));
 const port = 3001
 
-const url = 'mongodb://localhost:27017';
+const url = 'mongodb://127.0.0.1:27017';
 const client = new MongoClient(url);
 
 const dbName = 'greenmapper';
