@@ -35,8 +35,48 @@ app.get('/checkpolygon', async (req, res) => {
       }
     }).toArray();
 
-    console.log(JSON.parse(req.query.polygon)[0].length);
     res.send(result.length > 0);
+  } catch (error) {
+    res.status(500).send(error.message);
+  }
+});
+
+// 
+app.get('/getIntersectsInGrid', async (req, res) => {
+  console.log(JSON.parse(req.query.polygon));
+  try {
+    let collection = await connectDb('grid');
+
+    const result = await collection.find({
+      location: {
+        $geoIntersects: {
+          $geometry: {
+            type: "Polygon",
+            coordinates: JSON.parse(req.query.polygon)
+          }
+        }
+      }
+    }).toArray();
+
+    console.log("intersectResult", result);
+    res.send(result.length);
+  } catch (error) {
+    res.status(500).send(error.message);
+  }
+});
+
+// Created the entire grid of 100*100 cells and stores it in mongodb
+app.get('/createGrid', async (req, res) => {
+  try {
+    let collection = await connectDb("grid");
+
+    const size = await collection.countDocuments();
+
+    if(size == 0) {
+      await collection.insertOne({ type: "Polygon", coordinates: [[ 58, 12 ], [59, 13]] });
+    }
+
+    res.send(size);
   } catch (error) {
     res.status(500).send(error.message);
   }
