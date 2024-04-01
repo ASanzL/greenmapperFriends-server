@@ -47,7 +47,7 @@ app.get('/getIntersectsInGrid', async (req, res) => {
   
   try {
     let collection = await connectDb('grid');
-    const result = await collection.find({
+    const result = await collection.countDocuments({
       geometry: {
         $geoIntersects: {
             $geometry: {
@@ -56,10 +56,10 @@ app.get('/getIntersectsInGrid', async (req, res) => {
             }
         }
     }
-    }).toArray();
+    });
 
     console.log("intersectResult", result);
-    res.send(result);
+    res.send({"count": result});
   } catch (error) {
     res.status(500).send(error.message);
   }
@@ -73,39 +73,56 @@ app.get('/createGrid', async (req, res) => {
     const size = await collection.countDocuments();
 
     if(size == 0) {
-    // Define the size of each grid cell in degrees (100*100 meters)
-    const cellSize = 1 / 111319.45 * 100;
+     // Define the bounding box for Trollhättan
+    const minLat = 58.2; // Minimum latitude
+    const maxLat = 58.3; // Maximum latitude
+    const minLon = 12.2; // Minimum longitude
+    const maxLon = 12.35; // Maximum longitude
 
-    // Define the bounding box for Europe (with a bit of extension)
-    const minLat = 35; // Minimum latitude
-    const maxLat = 72; // Maximum latitude
-    const minLon = -12; // Minimum longitude
-    const maxLon = 40; // Maximum longitude
+    // Define the size of each grid cell in meters
+    const cellSize = 1000; // meters
+
+    // Calculate the number of steps needed for latitude and longitude
+    const numberOfStepsLat = Math.ceil((maxLat - minLat) * 111319.45 / cellSize);
+    const numberOfStepsLon = Math.ceil((maxLon - minLon) * 111319.45 * Math.cos(minLat * Math.PI / 180) / cellSize);
 
     // Iterate over latitude and longitude within the bounding box
-    for (let lat = minLat; lat < maxLat; lat += cellSize) {
-      for (let lon = minLon; lon < maxLon; lon += cellSize) {
-          const vertices = [
-              [lon, lat],
-              [lon + cellSize, lat],
-              [lon + cellSize, lat + cellSize],
-              [lon, lat + cellSize],
-              [lon, lat]  // Repeat the first vertex to close the polygon
-          ];
+    for (let lat = minLat; lat < maxLat; lat += cellSize / 111319.45) {
+        for (let lon = minLon; lon < maxLon; lon += (cellSize / (111319.45 * Math.cos(lat * Math.PI / 180)))) {
+            const vertices = [
+                [lon, lat],
+                [lon + (cellSize / (111319.45 * Math.cos(lat * Math.PI / 180))), lat],
+                [lon + (cellSize / (111319.45 * Math.cos(lat * Math.PI / 180))), lat + (cellSize / 111319.45)],
+                [lon, lat + (cellSize / 111319.45)],
+                [lon, lat]  // Repeat the first vertex to close the polygon
+            ];
 
-          // Insert the polygon into MongoDB
-          await collection.insertOne({
-              type: 'Feature',
-              geometry: {
-                  type: 'Polygon',
-                  coordinates: [vertices]
-              }
-          });
-      }
-  }
+            // Insert the polygon into MongoDB
+            await collection.insertOne({
+                type: 'Feature',
+                geometry: {
+                    type: 'Polygon',
+                    coordinates: [vertices]
+                }
+            });
+        }
+    }
 
   }
     res.send(size);
+  } catch (error) {
+    res.status(500).send(error.message);
+  }
+});
+
+// Only for debug
+app.get('/getGrid', async (req, res) => {
+  try {
+    let collection = await connectDb('grid');
+    
+    const result = await collection.find().toArray();
+    console.log("getGrid");
+    res.send(result);
   } catch (error) {
     res.status(500).send(error.message);
   }
