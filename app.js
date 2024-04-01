@@ -23,7 +23,7 @@ app.get('/', (req, res) => {
 app.get('/checkpolygon', async (req, res) => {
   try {
     let collection = await connectDb();
-
+    
     const result = await collection.find({
       location: {
         $geoIntersects: {
@@ -43,23 +43,23 @@ app.get('/checkpolygon', async (req, res) => {
 
 // 
 app.get('/getIntersectsInGrid', async (req, res) => {
-  console.log(JSON.parse(req.query.polygon));
+  // console.log(JSON.parse(req.query.polygon));
+  
   try {
     let collection = await connectDb('grid');
-
     const result = await collection.find({
-      location: {
+      geometry: {
         $geoIntersects: {
-          $geometry: {
-            type: "Polygon",
-            coordinates: JSON.parse(req.query.polygon)
-          }
+            $geometry: {
+                type: 'Polygon',
+                coordinates: JSON.parse(req.query.polygon)
+            }
         }
-      }
+    }
     }).toArray();
 
     console.log("intersectResult", result);
-    res.send(result.length);
+    res.send(result);
   } catch (error) {
     res.status(500).send(error.message);
   }
@@ -73,9 +73,38 @@ app.get('/createGrid', async (req, res) => {
     const size = await collection.countDocuments();
 
     if(size == 0) {
-      await collection.insertOne({ type: "Polygon", coordinates: [[ 58, 12 ], [59, 13]] });
-    }
+    // Define the size of each grid cell in degrees (100*100 meters)
+    const cellSize = 1 / 111319.45 * 100;
 
+    // Define the bounding box for Europe (with a bit of extension)
+    const minLat = 35; // Minimum latitude
+    const maxLat = 72; // Maximum latitude
+    const minLon = -12; // Minimum longitude
+    const maxLon = 40; // Maximum longitude
+
+    // Iterate over latitude and longitude within the bounding box
+    for (let lat = minLat; lat < maxLat; lat += cellSize) {
+      for (let lon = minLon; lon < maxLon; lon += cellSize) {
+          const vertices = [
+              [lon, lat],
+              [lon + cellSize, lat],
+              [lon + cellSize, lat + cellSize],
+              [lon, lat + cellSize],
+              [lon, lat]  // Repeat the first vertex to close the polygon
+          ];
+
+          // Insert the polygon into MongoDB
+          await collection.insertOne({
+              type: 'Feature',
+              geometry: {
+                  type: 'Polygon',
+                  coordinates: [vertices]
+              }
+          });
+      }
+  }
+
+  }
     res.send(size);
   } catch (error) {
     res.status(500).send(error.message);
