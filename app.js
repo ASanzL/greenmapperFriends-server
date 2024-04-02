@@ -43,11 +43,11 @@ app.get('/checkpolygon', async (req, res) => {
 
 // 
 app.get('/getIntersectsInGrid', async (req, res) => {
-  // console.log(JSON.parse(req.query.polygon));
+  console.log(JSON.parse(req.query.polygon));
   
   try {
     let collection = await connectDb('grid');
-    const result = await collection.countDocuments({
+    const result = await collection.find({
       geometry: {
         $geoIntersects: {
             $geometry: {
@@ -56,10 +56,10 @@ app.get('/getIntersectsInGrid', async (req, res) => {
             }
         }
     }
-    });
+    }).toArray();
 
     console.log("intersectResult", result);
-    res.send({"count": result});
+    res.send(result);
   } catch (error) {
     res.status(500).send(error.message);
   }
@@ -80,7 +80,7 @@ app.get('/createGrid', async (req, res) => {
     const maxLon = 12.35; // Maximum longitude
 
     // Define the size of each grid cell in meters
-    const cellSize = 1000; // meters
+    const cellSize = 100; // meters
 
     // Calculate the number of steps needed for latitude and longitude
     const numberOfStepsLat = Math.ceil((maxLat - minLat) * 111319.45 / cellSize);
