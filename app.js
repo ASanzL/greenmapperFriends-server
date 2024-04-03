@@ -74,18 +74,18 @@ app.get('/createGrid', async (req, res) => {
 
     if(size == 0) {
      // Define the bounding box for Trollhättan
-    const minLat = 58.2; // Minimum latitude
-    const maxLat = 58.3; // Maximum latitude
-    const minLon = 12.2; // Minimum longitude
-    const maxLon = 12.35; // Maximum longitude
+    const minLat = -90; // Minimum latitude
+    const maxLat = 90; // Maximum latitude
+    const minLon = -180; // Minimum longitude
+    const maxLon = 180; // Maximum longitude
 
     // Define the size of each grid cell in meters
-    const cellSize = 100; // meters
+    const cellSize = 100000; // meters
 
     // Calculate the number of steps needed for latitude and longitude
     const numberOfStepsLat = Math.ceil((maxLat - minLat) * 111319.45 / cellSize);
     const numberOfStepsLon = Math.ceil((maxLon - minLon) * 111319.45 * Math.cos(minLat * Math.PI / 180) / cellSize);
-
+    console.time('grid create');
     // Iterate over latitude and longitude within the bounding box
     for (let lat = minLat; lat < maxLat; lat += cellSize / 111319.45) {
         for (let lon = minLon; lon < maxLon; lon += (cellSize / (111319.45 * Math.cos(lat * Math.PI / 180)))) {
@@ -107,7 +107,7 @@ app.get('/createGrid', async (req, res) => {
             });
         }
     }
-
+    console.timeEnd('grid create');
   }
     res.send(size);
   } catch (error) {
