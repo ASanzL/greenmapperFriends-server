@@ -42,9 +42,7 @@ app.get('/checkpolygon', async (req, res) => {
 });
 
 // 
-app.get('/getIntersectsInGrid', async (req, res) => {
-  console.log(JSON.parse(req.query.polygon));
-  
+app.get('/getIntersectsInGrid', async (req, res) => {  
   try {
     let collection = await connectDb('grid');
     const result = await collection.find({
@@ -58,7 +56,6 @@ app.get('/getIntersectsInGrid', async (req, res) => {
     }
     }).toArray();
 
-    console.log("intersectResult", result);
     res.send(result);
   } catch (error) {
     res.status(500).send(error.message);
@@ -80,7 +77,7 @@ app.get('/createGrid', async (req, res) => {
     const maxLon = 180; // Maximum longitude
 
     // Define the size of each grid cell in meters
-    const cellSize = 100000; // meters
+    const cellSize = 1000000; // meters
 
     // Calculate the number of steps needed for latitude and longitude
     const numberOfStepsLat = Math.ceil((maxLat - minLat) * 111319.45 / cellSize);
@@ -121,7 +118,6 @@ app.get('/getGrid', async (req, res) => {
     let collection = await connectDb('grid');
     
     const result = await collection.find().toArray();
-    console.log("getGrid");
     res.send(result);
   } catch (error) {
     res.status(500).send(error.message);
@@ -130,12 +126,9 @@ app.get('/getGrid', async (req, res) => {
 
 // Upload to db test
 app.post('/sethome', async (req, res) => {
-  console.log('set home');
-  console.log(req.body);
   let collection = await connectDb();
  
   // collection.updateOne({}, { $set: {home: req.body.home} }, { upsert: true });
-  console.log(req.body);
   await collection.updateOne({}, { $set: {
     location: { type: "Point", coordinates: req.body}
   }}, { upsert: true });
