@@ -81,7 +81,7 @@ app.get("/createGrid", async (req, res) => {
       const maxLon = 180; // Maximum longitude
 
       // Define the size of each grid cell in meters
-      const cellSize = 10000;
+      const cellSize = 100000;
 
       const vertices = [];
       let latStepAmount;
@@ -113,7 +113,7 @@ app.get("/createGrid", async (req, res) => {
         }
       }
       // Insert the polygon into MongoDB
-      await collection.insertMany(vertices);
+      await collection.insertMany(vertices, { ordered: false, writeConcern: { w: false } });
       console.timeEnd("grid create");
     }
     res.send(size);
