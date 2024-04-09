@@ -98,6 +98,30 @@ app.get("/createGrid", async (req, res) => {
   }
 });
 
+// Created the entire grid of 100*100 cells and stores it in mongodb
+app.get("/cell", async (req, res) => {
+  try {
+    console.log(req.query);
+    if(!req.query.lat || !req.query.lon || !req.query.cellSize) {
+      res.status(400).send("Require latitude, lonitude and cellSize");
+    }
+    let collection = await connectDb("grid");
+
+    const result = await collection
+      .find({
+        _id: {
+          lat: { $gte: 0 },
+          lon: Number(req.query.lon),
+          cellSize: Number(req.query.cellSize)
+        },
+      }).toArray();
+      console.log(result);
+    res.send(result);
+  } catch (error) {
+    res.status(500).send(error.message);
+  }
+});
+
 // Only for debug
 app.get("/getGrid", async (req, res) => {
   try {
