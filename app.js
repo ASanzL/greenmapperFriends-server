@@ -19,30 +19,6 @@ app.get("/", (req, res) => {
   res.send("Hello World!");
 });
 
-// Upload to db test
-app.get("/checkpolygon", async (req, res) => {
-  try {
-    let collection = await connectDb();
-
-    const result = await collection
-      .find({
-        location: {
-          $geoIntersects: {
-            $geometry: {
-              type: "Polygon",
-              coordinates: JSON.parse(req.query.polygon),
-            },
-          },
-        },
-      })
-      .toArray();
-
-    res.send(result.length > 0);
-  } catch (error) {
-    res.status(500).send(error.message);
-  }
-});
-
 //
 app.get("/getIntersectsInGrid", async (req, res) => {
   try {
