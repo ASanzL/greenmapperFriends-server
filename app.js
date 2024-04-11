@@ -2,6 +2,7 @@ const express = require("express");
 const { MongoClient } = require("mongodb");
 const cors = require("cors");
 const bodyparser = require("body-parser");
+const axios = require("axios");
 
 require("dotenv").config();
 
@@ -121,6 +122,32 @@ app.get("/createGrid", async (req, res) => {
     res.status(500).send(error.message);
   }
 });
+
+
+// Only for debug
+app.get("/geoServer", async (req, res) => {
+  try {
+    axios
+    .get("http://217.21.192.143:8080/geoserver/wfs", {
+      params: {
+        service: 'WFS',
+        version: '2.0.0',
+        request: 'GetFeature',
+        typename: 'ltser:greenmapper.grid',
+        srsname: 'EPSG:4326',
+        outputFormat: 'application/json'
+      },
+      responseType: 'json',
+    })
+    .then(function (response) {
+      console.log(response.data.features.length);
+    });
+
+  } catch (error) {
+    res.status(550).send(error.message);
+  }
+});
+
 
 // Only for debug
 app.get("/getGrid", async (req, res) => {
