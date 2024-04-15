@@ -122,28 +122,58 @@ app.get("/cell", async (req, res) => {
     res.status(500).send(error.message);
   }
 });
-
-
-// Only for debug
+// Search in GeoServer
 app.get("/geoServer", async (req, res) => {
   try {
-    axios
-    .get("http://217.21.192.143:8080/geoserver/wfs", {
+    // console.log(JSON.parse(req.query.polygon));
+
+    const polygon = JSON.parse(req.query.polygon);
+    let polygonWFSString = "";
+
+    polygon.forEach((point, index) => {
+      polygonWFSString += `${point[0]} ${point[1]}`;
+      if(index != polygon.length -1) {
+        polygonWFSString += ", ";
+      }
+    });
+
+    // Define the polygon coordinates
+    const polygonCoordinates = [
+      [ 
+        ["58.28 12.28"],
+        ["58.28 13.28"],
+        ["59.28 13.28"],
+        ["59.28 12.28"],
+        ["58.28 12.28"]
+      ]
+    ];
+
+    // Convert polygon coordinates to WKT (Well-Known Text) format
+    const polygonWKT = `POLYGON((${polygonWFSString}))`;
+console.log(`INTERSECTS(geom, ${(polygonWKT)})`);
+    // Make the request to GeoServer
+    axios.get("http://217.21.192.143:8080/geoserver/wfs", {
       params: {
         service: 'WFS',
-        version: '2.0.0',
+        version: '1.1.1',
         request: 'GetFeature',
         typename: 'ltser:greenmapper.grid',
         srsname: 'EPSG:4326',
-        outputFormat: 'application/json'
+        outputFormat: 'application/json',
+        cql_filter: `INTERSECTS(geom, ${(polygonWKT)})`
       },
       responseType: 'json',
     })
     .then(function (response) {
-      console.log(response.data.features.length);
+      res.send({ data: response.data.features });
+    })
+    .catch(function (error) {
+      console.log(error.message);
+      res.status(550).send(error);
     });
 
   } catch (error) {
+    console.log(error.message);
     res.status(550).send(error.message);
   }
 });
