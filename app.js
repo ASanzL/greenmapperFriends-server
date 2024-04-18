@@ -23,22 +23,38 @@ app.get("/", (req, res) => {
 //
 app.get("/getIntersectsInGrid", async (req, res) => {
   try {
-    let collection = await connectDb("grid");
+    let collection = await connectDb("grid-1km");
+    const polygon = JSON.parse(req.query.polygon);
+    const center = JSON.parse(req.query.center);
+    const radius = Math.ceil(req.query.radius) + 3000;
+    console.log(center);
+    console.time("GeoIntersect")
     const result = await collection
-      .find({
-        geometry: {
-          $geoIntersects: {
-            $geometry: {
-              type: "Polygon",
-              coordinates: JSON.parse(req.query.polygon),
+      .aggregate([{
+          $geoNear: {
+              near: { type: "Point", coordinates: center },
+              distanceField: "dist.calculated",
+              maxDistance: radius,
+          },
+      },
+      {
+        $match: {
+          geometry: {
+            $geoIntersects: {
+              $geometry: {
+                type: "Polygon",
+                coordinates: polygon,
               },
+            },
           },
         },
-      })
+      }
+    ])
       .toArray();
-console.log(JSON.parse(req.query.polygon));
+      console.timeEnd("GeoIntersect");
     res.send(result);
   } catch (error) {
+    console.log(error.message);
     res.status(500).send(error.message);
   }
 });
@@ -46,7 +62,7 @@ console.log(JSON.parse(req.query.polygon));
 // Created the entire grid of 100*100 cells and stores it in mongodb
 app.get("/createGrid", async (req, res) => {
   try {
-    let collection = await connectDb("grid");
+    let collection = await connectDb("grid-test");
 
     const size = await collection.countDocuments();
 
@@ -60,7 +76,7 @@ app.get("/createGrid", async (req, res) => {
       // Define the size of each grid cell in meters
       const cellSize = 100000;
 
-      const vertices = [];
+      let vertices = [];
       let latStepAmount;
       let lonOffset;
       let latOffset;
@@ -75,22 +91,26 @@ app.get("/createGrid", async (req, res) => {
           lonOffset = lon + latStepAmount;
           vertices.push({
             _id: { lat, lon, cellSize },
-            type: "Feature",
             geometry: {
-              type: "Polygon",
-              coordinates: [[
+              type: "Point",
+              coordinates: 
                 [lon, lat],
-                [lonOffset, lat],
-                [lonOffset, latOffset],
-                [lon, latOffset],
-                [lon, lat],
-              ]],
               },
+            offset: {
+              lon: lonOffset,
+              lat: latOffset
+            }
           });
         }
+        if (vertices.length > 2000000) {
+          console.log("Insert: ", vertices.length);
+          await collection.insertMany(vertices, { ordered: false });
+          console.log("Insert done");
+          vertices = [];
+        }
       }
+      await collection.insertMany(vertices, { ordered: false });
       // Insert the polygon into MongoDB
-      await collection.insertMany(vertices, { ordered: false, writeConcern: { w: false } });
       console.timeEnd("grid create");
     }
     res.send(size);
@@ -125,8 +145,6 @@ app.get("/cell", async (req, res) => {
 // Search in GeoServer
 app.get("/geoServer", async (req, res) => {
   try {
-    // console.log(JSON.parse(req.query.polygon));
-
     const polygon = JSON.parse(req.query.polygon);
     let polygonWFSString = "";
 
@@ -137,20 +155,10 @@ app.get("/geoServer", async (req, res) => {
       }
     });
 
-    // Define the polygon coordinates
-    const polygonCoordinates = [
-      [ 
-        ["58.28 12.28"],
-        ["58.28 13.28"],
-        ["59.28 13.28"],
-        ["59.28 12.28"],
-        ["58.28 12.28"]
-      ]
-    ];
-
     // Convert polygon coordinates to WKT (Well-Known Text) format
     const polygonWKT = `POLYGON((${polygonWFSString}))`;
-console.log(`INTERSECTS(geom, ${(polygonWKT)})`);
+
+    console.time("GeoServer");
     // Make the request to GeoServer
     axios.get("http://217.21.192.143:8080/geoserver/wfs", {
       params: {
@@ -165,6 +173,7 @@ console.log(`INTERSECTS(geom, ${(polygonWKT)})`);
       responseType: 'json',
     })
     .then(function (response) {
+      console.timeEnd("GeoServer");
       res.send({ data: response.data.features });
     })
     .catch(function (error) {
