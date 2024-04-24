@@ -26,9 +26,20 @@ app.get("/getIntersectsInGrid", async (req, res) => {
     let collection = await connectDb("grid-1km");
     const polygon = JSON.parse(req.query.polygon);
     const center = JSON.parse(req.query.center);
-    const radius = Math.ceil(req.query.radius) + 3000;
-    console.log(center);
-    console.time("GeoIntersect")
+    const radius = Math.ceil(req.query.radius);
+    const area = Number(req.query.area);
+    let createSmallerGrid = false;
+    console.log(area, area > 20000);
+    //1000*1000m
+    if(area > 55000000) {
+      console.log("1000");
+      createSmallerGrid = false;
+    }
+    // 100*100m
+    else {
+      createSmallerGrid = true;
+    }
+
     const result = await collection
       .aggregate([{
           $geoNear: {
@@ -37,22 +48,38 @@ app.get("/getIntersectsInGrid", async (req, res) => {
               maxDistance: radius,
           },
       },
-      {
-        $match: {
+    ])
+      .toArray();
+      console.log(createSmallerGrid);
+      if(createSmallerGrid) {
+        for await (const [i, cell] of result.entries()) {
+          let tempCollection = await connectDb("grid-temp");
+          await createGrid(options = {
+            collection: tempCollection,
+            minLon: cell.geometry.coordinates[0],
+            maxLon: cell.offset.lon - 0.0001,
+            minLat: cell.geometry.coordinates[1],
+            maxLat: cell.offset.lat,
+            cellSize: 100,
+            index: i
+          });
+        }
+        let tempCollection = await connectDb("grid-temp");
+        let intsersectionResult = await tempCollection.find({
           geometry: {
             $geoIntersects: {
               $geometry: {
                 type: "Polygon",
-                coordinates: polygon,
-              },
-            },
-          },
-        },
-      }
-    ])
-      .toArray();
-      console.timeEnd("GeoIntersect");
-    res.send(result);
+                coordinates: JSON.parse(req.query.polygon)
+              }
+            }
+          }
+        }).toArray();
+    await tempCollection.drop();
+    res.send(intsersectionResult);
+    } else {
+      res.send(result);
+    }
   } catch (error) {
     console.log(error.message);
     res.status(500).send(error.message);
@@ -62,58 +89,16 @@ app.get("/getIntersectsInGrid", async (req, res) => {
 // Created the entire grid of 100*100 cells and stores it in mongodb
 app.get("/createGrid", async (req, res) => {
   try {
-    let collection = await connectDb("grid-test");
+    let collection = await connectDb("grid-test2");
 
     const size = await collection.countDocuments();
 
     if (size == 0) {
-      // Define the bounding box
-      const minLat = -90; // Minimum latitude
-      const maxLat = 90; // Maximum latitude
-      const minLon = -180; // Minimum longitude
-      const maxLon = 180; // Maximum longitude
-
-      // Define the size of each grid cell in meters
-      const cellSize = 100000;
-
-      let vertices = [];
-      let latStepAmount;
-      let lonOffset;
-      let latOffset;
-      const degreesPerMeter = cellSize / 111319.45;
-      console.time("grid create");
-      // Iterate over latitude and longitude within the bounding box
-      for (let lat = minLat; lat < maxLat; lat += degreesPerMeter) {
-        latStepAmount =
-          cellSize / (111319.45 * Math.cos((lat * Math.PI) / 180));
-        latOffset = lat + degreesPerMeter;
-        for (let lon = minLon; lon < maxLon; lon += latStepAmount) {
-          lonOffset = lon + latStepAmount;
-          vertices.push({
-            _id: { lat, lon, cellSize },
-            geometry: {
-              type: "Point",
-              coordinates: 
-                [lon, lat],
-              },
-            offset: {
-              lon: lonOffset,
-              lat: latOffset
-            }
-          });
-        }
-        if (vertices.length > 2000000) {
-          console.log("Insert: ", vertices.length);
-          await collection.insertMany(vertices, { ordered: false });
-          console.log("Insert done");
-          vertices = [];
-        }
-      }
-      await collection.insertMany(vertices, { ordered: false });
-      // Insert the polygon into MongoDB
-      console.timeEnd("grid create");
+      await createGrid({
+        collection: collection
+      });
     }
-    res.send(size);
+    res.sendStatus(201);
   } catch (error) {
     res.status(500).send(error.message);
   }
@@ -228,6 +213,59 @@ app.get("/gethome", async (req, res) => {
 app.listen(port, () => {
   console.log(`Example app listening on port ${port}`);
 });
+
+async function createGrid(options = { collection, minLat, maxLat, minLon, maxLon, cellSize }) {
+  const collection = options.collection ? options.collection : null;
+  const minLat = options.minLat ? options.minLat : -90;
+  const maxLat = options.maxLat ? options.maxLat : 90;
+  const minLon = options.minLon ? options.minLon : -180;
+  const maxLon = options.maxLon ? options.maxLon : 180;
+  const cellSize = options.cellSize ? options.cellSize : 100000;
+
+  // Define the size of each grid cell in meters
+
+  let vertices = [];
+  let lonStepAmount;
+  let lonOffset;
+  let latOffset;
+  const degreesPerMeter = cellSize / 111319.45;
+  
+  for (let lat = minLat; lat < maxLat; lat += degreesPerMeter) {
+    lonStepAmount = cellSize / (111319.45 * Math.cos((lat * Math.PI) / 180));
+    lonCorrection = minLon % lonStepAmount;
+    latOffset = lat + degreesPerMeter;
+    for (let lon = minLon - lonCorrection; lon < maxLon - lonCorrection; lon += lonStepAmount) {
+      lonOffset = lon + lonStepAmount;
+      let vertice = {
+        _id: { lat, lon, cellSize },
+        geometry: {
+          type: "Point",
+          coordinates: [lon, lat],
+        },
+        offset: {
+          lon: lonOffset,
+          lat: latOffset
+        }
+      };
+      if (options.index != null) {
+        vertice._id.index = options.index;
+      }
+      vertices.push(vertice);
+    }
+    if (collection != null && vertices.length > 2000000) {
+      console.log("Insert: ", vertices.length);
+      await collection.insertMany(vertices, { ordered: false });
+      console.log("Insert done");
+      vertices = [];
+    }
+  }
+  if(collection != null) {
+    await collection.insertMany(vertices, { ordered: false });
+  }
+  // Insert the polygon into MongoDB
+  // console.timeEnd("grid create");
+  return vertices;
+}
 
 async function connectDb(collectionName = "test") {
   await client.connect();
