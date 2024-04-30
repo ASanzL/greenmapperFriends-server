@@ -16,6 +16,8 @@ const client = new MongoClient(url);
 
 const dbName = "greenmapper";
 
+const earthRadius = 6371000;
+
 app.get("/", (req, res) => {
   res.send("Hello World!");
 });
@@ -23,63 +25,81 @@ app.get("/", (req, res) => {
 //
 app.get("/getIntersectsInGrid", async (req, res) => {
   try {
-    let collection = await connectDb("grid-1km");
     const polygon = JSON.parse(req.query.polygon);
     const center = JSON.parse(req.query.center);
     const radius = Math.ceil(req.query.radius);
     const area = Number(req.query.area);
-    let createSmallerGrid = false;
-    console.log(area, area > 20000);
-    //1000*1000m
-    if(area > 55000000) {
-      console.log("1000");
-      createSmallerGrid = false;
+    let gridSize = 10000;
+    let collectionName = "grid-100km";
+    let tempCollectionName = "";
+    console.log(area);
+    // World
+    if(area > Number(req.query.worldMinArea)) {
+      gridSize = 100000;
+      collectionName = "grid-100km";
     }
-    // 100*100m
+    // Country
+    else if (area > Number(req.query.countryMinArea)) {
+      gridSize = 10000;
+      collectionName = "grid-10km";
+    }
+    // region
+    else if (area > Number(req.query.regionMinArea)) {
+      gridSize = 1000;
+      collectionName = "grid-1km";
+    }
+    // neighbourhood
+    else if (area > 0) {
+      gridSize = 100;
+      collectionName = "grid-1km";
+      tempCollectionName = "grid-temp-" + Math.floor(Math.random() * 10000000).toString();
+      console.log(tempCollectionName);
+    }
     else {
-      createSmallerGrid = true;
+      res.status(500).send("Error: No polygon");
+      return;
     }
-
+    
+    let collection = await connectDb(collectionName);
     const result = await collection
       .aggregate([{
           $geoNear: {
               near: { type: "Point", coordinates: center },
               distanceField: "dist.calculated",
-              maxDistance: radius,
+              maxDistance: radius * 1.4,
           },
       },
     ])
       .toArray();
-      console.log(createSmallerGrid);
-      if(createSmallerGrid) {
+      // If the grid is 100*100m, create a temporary grid based on 1km cells
+      if(gridSize == 100) {
         for await (const [i, cell] of result.entries()) {
-          let tempCollection = await connectDb("grid-temp");
+          let tempCollection = await connectDb(tempCollectionName);
           await createGrid(options = {
             collection: tempCollection,
             minLon: cell.geometry.coordinates[0],
-            maxLon: cell.offset.lon - 0.0001,
+            maxLon: cell.offset.lon,
             minLat: cell.geometry.coordinates[1],
             maxLat: cell.offset.lat,
             cellSize: 100,
             index: i
           });
         }
-        let tempCollection = await connectDb("grid-temp");
-        let intsersectionResult = await tempCollection.find({
+      }
+      let intersectCollection = await connectDb(gridSize == 100 ? tempCollectionName : collectionName);
+        let intsersectionResult = await intersectCollection.find({
           geometry: {
             $geoIntersects: {
               $geometry: {
                 type: "Polygon",
-                coordinates: JSON.parse(req.query.polygon)
+                coordinates: polygon
               }
             }
           }
         }).toArray();
-    await tempCollection.drop();
+    //await tempCollection.drop();
     res.send(intsersectionResult);
-    } else {
-      res.send(result);
-    }
+
   } catch (error) {
     console.log(error.message);
     res.status(500).send(error.message);
@@ -89,16 +109,17 @@ app.get("/getIntersectsInGrid", async (req, res) => {
 // Created the entire grid of 100*100 cells and stores it in mongodb
 app.get("/createGrid", async (req, res) => {
   try {
-    let collection = await connectDb("grid-test2");
+    let collection = await connectDb("grid-100km");
 
     const size = await collection.countDocuments();
 
     if (size == 0) {
-      await createGrid({
-        collection: collection
+      const result = await createGrid({
+        collection: collection,
+        cellSize: 100000
       });
+      res.send({ created: result.length });
     }
-    res.sendStatus(201);
   } catch (error) {
     res.status(500).send(error.message);
   }
@@ -216,10 +237,10 @@ app.listen(port, () => {
 
 async function createGrid(options = { collection, minLat, maxLat, minLon, maxLon, cellSize }) {
   const collection = options.collection ? options.collection : null;
-  const minLat = options.minLat ? options.minLat : -90;
-  const maxLat = options.maxLat ? options.maxLat : 90;
-  const minLon = options.minLon ? options.minLon : -180;
-  const maxLon = options.maxLon ? options.maxLon : 180;
+  const minLat = options.minLat ? options.minLat : -89;
+  const maxLat = options.maxLat ? options.maxLat : 89;
+  const minLon = options.minLon ? options.minLon : -179;
+  const maxLon = options.maxLon ? options.maxLon : 179;
   const cellSize = options.cellSize ? options.cellSize : 100000;
 
   // Define the size of each grid cell in meters
@@ -228,19 +249,26 @@ async function createGrid(options = { collection, minLat, maxLat, minLon, maxLon
   let lonStepAmount;
   let lonOffset;
   let latOffset;
-  const degreesPerMeter = cellSize / 111319.45;
+
+  let latStepAmount = Math.abs(minLat - calculateDegreesLatitude(minLat, cellSize));
+  // console.log(latStepAmount);
+  lonStepAmount = Math.abs(calculateDegreesLongitude(minLon, cellSize, minLat, minLat + latStepAmount));
+  let lastLon = minLon;
   
-  for (let lat = minLat; lat < maxLat; lat += degreesPerMeter) {
-    lonStepAmount = cellSize / (111319.45 * Math.cos((lat * Math.PI) / 180));
+  for (let lat = minLat; lat < maxLat - latStepAmount; lat += latStepAmount - 0.000001) {
+    latStepAmount = Math.abs(lat - calculateDegreesLatitude(lat, cellSize, 180));
+    // λ2 = λ1 + atan2( sin θ ⋅ sin δ ⋅ cos φ1, cos δ − sin φ1 ⋅ sin φ2 )
     lonCorrection = minLon % lonStepAmount;
-    latOffset = lat + degreesPerMeter;
-    for (let lon = minLon - lonCorrection; lon < maxLon - lonCorrection; lon += lonStepAmount) {
+    latOffset = lat + latStepAmount;
+    lonStepAmount = Math.abs(calculateDegreesLongitude(lastLon, cellSize, lat, lat + latStepAmount));
+    for (let lon = minLon - lonCorrection; lon < maxLon - lonCorrection; lon += lonStepAmount + 0.000001) {
+      lastLon = lon;
       lonOffset = lon + lonStepAmount;
       let vertice = {
         _id: { lat, lon, cellSize },
         geometry: {
           type: "Point",
-          coordinates: [lon, lat],
+          coordinates: [((lon + 180) % 360 + 360) % 360 - 180, lat],
         },
         offset: {
           lon: lonOffset,
@@ -265,6 +293,22 @@ async function createGrid(options = { collection, minLat, maxLat, minLon, maxLon
   // Insert the polygon into MongoDB
   // console.timeEnd("grid create");
   return vertices;
+}
+
+function calculateDegreesLatitude(lat1, distance, bearing = 90) {
+  const lat1Rad = lat1 * (Math.PI / 180); // Convert latitude to radians
+  const bearingRad = bearing * (Math.PI / 180); // Convert bearing to radians
+
+  return Math.asin(Math.sin(lat1Rad) * Math.cos(distance / earthRadius) + Math.cos(lat1Rad) * Math.sin(distance / earthRadius) * Math.cos(bearingRad)) * (180 / Math.PI);
+}
+
+function calculateDegreesLongitude(lon1, distance, lat1, lat2, bearing = 90) {
+  const lat1Rad = lat1 * (Math.PI / 180); // Convert latitudes to radians
+  const lat2Rad = lat2 * (Math.PI / 180);
+  const bearingRad = bearing * (Math.PI / 180); // Convert bearing to radians
+
+  return Math.atan2(Math.sin(bearingRad) * Math.sin(distance / earthRadius) * Math.cos(lat1Rad),
+      Math.cos(distance / earthRadius) - Math.sin(lat1Rad) * Math.sin(lat2Rad)) * (180 / Math.PI);
 }
 
 async function connectDb(collectionName = "test") {
