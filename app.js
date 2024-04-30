@@ -97,7 +97,10 @@ app.get("/getIntersectsInGrid", async (req, res) => {
             }
           }
         }).toArray();
-    //await tempCollection.drop();
+        if(gridSize == 100) {
+          let tempCollection = await connectDb(tempCollectionName);
+          await tempCollection.drop();
+        }
     res.send(intsersectionResult);
 
   } catch (error) {
@@ -237,10 +240,10 @@ app.listen(port, () => {
 
 async function createGrid(options = { collection, minLat, maxLat, minLon, maxLon, cellSize }) {
   const collection = options.collection ? options.collection : null;
-  const minLat = options.minLat ? options.minLat : -89;
-  const maxLat = options.maxLat ? options.maxLat : 89;
-  const minLon = options.minLon ? options.minLon : -179;
-  const maxLon = options.maxLon ? options.maxLon : 179;
+  const minLat = options.minLat ? options.minLat : -90;
+  const maxLat = options.maxLat ? options.maxLat : 90;
+  const minLon = options.minLon ? options.minLon : -180;
+  const maxLon = options.maxLon ? options.maxLon : 180;
   const cellSize = options.cellSize ? options.cellSize : 100000;
 
   // Define the size of each grid cell in meters
@@ -255,24 +258,23 @@ async function createGrid(options = { collection, minLat, maxLat, minLon, maxLon
   lonStepAmount = Math.abs(calculateDegreesLongitude(minLon, cellSize, minLat, minLat + latStepAmount));
   let lastLon = minLon;
   
-  for (let lat = minLat; lat < maxLat - latStepAmount; lat += latStepAmount - 0.000001) {
+  for (let lat = minLat + latStepAmount / 2; lat + latStepAmount < maxLat - latStepAmount; lat += latStepAmount) {
     latStepAmount = Math.abs(lat - calculateDegreesLatitude(lat, cellSize, 180));
     // λ2 = λ1 + atan2( sin θ ⋅ sin δ ⋅ cos φ1, cos δ − sin φ1 ⋅ sin φ2 )
-    lonCorrection = minLon % lonStepAmount;
-    latOffset = lat + latStepAmount;
+    latOffset = Math.abs(lat - latStepAmount);
     lonStepAmount = Math.abs(calculateDegreesLongitude(lastLon, cellSize, lat, lat + latStepAmount));
-    for (let lon = minLon - lonCorrection; lon < maxLon - lonCorrection; lon += lonStepAmount + 0.000001) {
+    for (let lon = minLon; lon + lonStepAmount < maxLon; lon += lonStepAmount) {
       lastLon = lon;
-      lonOffset = lon + lonStepAmount;
+      lonOffset = Math.abs(lon - lonStepAmount);
       let vertice = {
         _id: { lat, lon, cellSize },
         geometry: {
           type: "Point",
-          coordinates: [((lon + 180) % 360 + 360) % 360 - 180, lat],
+          coordinates: [((lon + (lonStepAmount / 2) + 180) % 360 + 360) % 360 - 180, lat + (latStepAmount / 2)],
         },
         offset: {
-          lon: lonOffset,
-          lat: latOffset
+          lon: lonStepAmount / 2,
+          lat: latStepAmount / 2
         }
       };
       if (options.index != null) {
