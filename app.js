@@ -67,7 +67,6 @@ app.get("/getIntersectsInGrid", async (req, res) => {
       res.status(500).send("Error: No polygon");
       return;
     }
-    console.log("GRIDSIZE: ", gridSize);
     let collection = await connectDb(collectionName);
     const result = await collection
       .aggregate([{
@@ -78,23 +77,24 @@ app.get("/getIntersectsInGrid", async (req, res) => {
           },
       },
     ]).toArray();
-      // If the grid is 100*100m, create a temporary grid based on 1km cells
-      if(gridSize == 100) {
-        console.log("100m");
-        for await (const [i, cell] of result.entries()) {
-          let tempCollection = await connectDb(tempCollectionName);
-          await createGrid(options = {
-            collection: tempCollection,
-            minLon: cell.geometry.coordinates[0],
-            maxLon: cell.geometry.coordinates[0] + cell.offset.lon,
-            minLat: cell.geometry.coordinates[1],
-            maxLat: cell.geometry.coordinates[1] + cell.offset.lat,
-            cellSize: 100,
-            index: i
-          });
-        }
+
+    // If the grid is 100*100m, create a temporary grid based on 1km cells
+    if(gridSize == 100) {
+      for await (const [i, cell] of result.entries()) {
+        let tempCollection = await connectDb(tempCollectionName);
+        await createGrid(options = {
+          collection: tempCollection,
+          minLon: cell.geometry.coordinates[0],
+          maxLon: cell.geometry.coordinates[0] + cell.offset.lon,
+          minLat: cell.geometry.coordinates[1],
+          maxLat: cell.geometry.coordinates[1] + cell.offset.lat,
+          cellSize: 100,
+          index: i
+        });
       }
-      let intersectCollection = await connectDb(gridSize == 100 ? tempCollectionName : collectionName);
+    }
+
+    let intersectCollection = await connectDb(gridSize == 100 ? tempCollectionName : collectionName);
 
     let filter = {
       geometry: {
@@ -116,11 +116,13 @@ app.get("/getIntersectsInGrid", async (req, res) => {
     let mgrsGrid = [];
 
     for (cell of intsersectionResult) {
-      console.log(cell);
       mgrsGrid.push(getMGRSStringFromLatLng(cell.geometry.coordinates[1], cell.geometry.coordinates[0], mgrsSize));
     }
-    console.log(mgrsGrid);
-    res.send({createdGrid: intsersectionResult, mgrsGrid});
+
+    res.send({
+      createdGrid: intsersectionResult, 
+      mgrsGrid
+    });
 
   } catch (error) {
     console.log(error.message);
@@ -131,46 +133,30 @@ app.get("/getIntersectsInGrid", async (req, res) => {
 // Created the entire grid of size "cellSize" cells and stores it in mongodb
 app.get("/createGrid", async (req, res) => {
   try {
-    let collection = await connectDb("grid-100km");
-
-    const size = await collection.countDocuments();
-
-    if (size == 0) {
-      const result = await createGrid({
-        minLat: -90,
-        maxLat: 90,
-        minLon: -180,
-        maxLon: 180,
-        collection: collection,
-        cellSize: 100000
-      });
-      await collection.createIndex( { "geometry" : "2dsphere" } );
-      res.send({ created: result.length });
+    for(let x = 0; x < 1; x++) {
+      console.time("create")
+      let collection = await connectDb("grid-100km-m");
+  
+      const size = await collection.countDocuments();
+  
+      if (size == 0) {
+        const result = await createGrid({
+          minLat: -90,
+          maxLat: 90,
+          minLon: -180,
+          maxLon: 180,
+          collection: collection,
+          cellSize: 1000
+        });
+        await collection.createIndex( { "geometry" : "2dsphere" } );
+        console.timeEnd("create");
+        await collection.drop();
     }
-  } catch (error) {
-    res.status(500).send(error.message);
   }
-});
-
-// Find a cell based on longitude and latitude
-app.get("/cell", async (req, res) => {
-  try {
-    console.log(req.query);
-    if(!req.query.lat || !req.query.lon || !req.query.cellSize) {
-      res.status(400).send("Require latitude, lonitude and cellSize");
-    }
-    let collection = await connectDb("grid");
-
-    const result = await collection
-      .find({
-        _id: {
-          lat: { $gte: 0 },
-          lon: Number(req.query.lon),
-          cellSize: Number(req.query.cellSize)
-        },
-      }).toArray();
-      console.log(result);
-    res.send(result);
+  res.send(
+    // { created: result.length }
+    {created: true}
+  );
   } catch (error) {
     res.status(500).send(error.message);
   }
@@ -221,6 +207,47 @@ app.get("/geoServer", async (req, res) => {
   }
 });
 
+// Donate on an array of cells
+app.post("/donate", async (req, res) => {
+  try {
+    let cells = req.body.params.cells;
+    let collection = await connectDb("donations");
+    let cellsToInsert = [];
+    // await cells.forEach(async (cell) => {
+    //   let storedCell = await getCellFromLatLng(cell.southWest.lat, cell.southWest.lng, cell.size, "grid-10km");
+    //   console.log("storedcell");
+    //   cellsToInsert.push(storedCell);
+    // });
+    for (const cell of cells) {
+      let storedCell = await getCellFromLatLng(cell.southWest.lat, cell.southWest.lng, cell.size, cellSizeToCollectionName(cell.size));
+      console.log("storedcell");
+      cellsToInsert.push(storedCell);
+    }
+    console.log("INSERT");
+    await collection.insertOne({
+      cells: cellsToInsert
+    });
+    res.send(cells);
+  } catch (error) {
+    res.status(500).send(error.message);
+  }
+});
+
+// Get all cells for creating the heatmap
+app.get("/heatmap", async (req, res) => {
+  try {
+    // let cellSize = req.body.params.cellSize;
+    let collection = await connectDb("donations");
+    
+    let result = await collection.find().toArray();
+
+    console.log(result);
+
+    res.send(result);
+  } catch (error) {
+    res.status(500).send(error.message);
+  }
+});
 
 // Only for debug
 app.get("/getGrid", async (req, res) => {
@@ -312,19 +339,15 @@ async function createGrid(options = { collection, minLat, maxLat, minLon, maxLon
       // }
     }
     if (collection != null && vertices.length > 2000000) {
-      console.log("Insert: ", vertices.length);
       await collection.insertMany(vertices, { ordered: false });
-      console.log("Insert done");
       vertices = [];
     }
   }
   if(collection != null) {
-    console.log("insert", vertices);
     await collection.insertMany(vertices, { ordered: false });
   }
   // Insert the polygon into MongoDB
   // console.timeEnd("grid create");
-  console.log("vertices", vertices);
   return vertices;
 }
 
@@ -355,4 +378,39 @@ async function connectDb(collectionName = "test") {
   console.log("Connected successfully to server");
   const db = client.db(dbName);
   return db.collection(collectionName);
+}
+
+async function getCellFromLatLng(lat, lng, size, grid) {
+  let collection = await connectDb(grid);
+  const resultNear = await collection
+  .aggregate([{
+      $geoNear: {
+          near: { type: "Point", coordinates: [lng, lat] },
+          distanceField: "dist.calculated",
+          maxDistance: size * 0.1,
+      },
+  },
+]).toArray();
+return resultNear;
+}
+
+function cellSizeToCollectionName(cellSize) {
+  switch (cellSize) {
+    case 100000:
+      return "grid-100km";
+      break;
+    case 10000:
+      return "grid-10km";
+      break;
+    case 1000:
+      return "grid-1kmm";
+      break;
+    case 100:
+      return "grid-1kmm";
+      break;
+  
+    default:
+      return "Not an accepted size"
+      break;
+  }
 }
